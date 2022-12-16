@@ -1,9 +1,5 @@
-use kdam::Bar;
-use kdam::BarExt;
-use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
-    ops::Add,
-};
+use kdam::{Bar, BarExt};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct RoomID(u16);
@@ -85,38 +81,7 @@ impl Current {
     }
 }
 
-#[derive(Debug, Default, Clone, Eq)]
-struct Result {
-    total: u64,
-}
-
-impl PartialEq for Result {
-    fn eq(&self, other: &Self) -> bool {
-        self.total.eq(&other.total)
-    }
-}
-
-impl PartialOrd for Result {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(&other))
-    }
-}
-
-impl Ord for Result {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.total.cmp(&other.total)
-    }
-}
-
-impl Add<Result> for Result {
-    type Output = Result;
-
-    fn add(self, rhs: Result) -> Self::Output {
-        Self {
-            total: self.total + rhs.total,
-        }
-    }
-}
+type Result = u64;
 
 fn find_best(
     rooms: &HashMap<RoomID, Room>,
@@ -163,14 +128,13 @@ fn find_best(
         vec![None]
     };
 
-    let mut totals = Vec::<Result>::new();
-
     let mut pb = if first {
         Some(Bar::new(me_options.len() * el_options.len()))
     } else {
         None
     };
 
+    let mut best_release = 0;
     for me_data in &me_options {
         for el_data in &el_options {
             if let Some(pb) = &mut pb {
@@ -197,11 +161,9 @@ fn find_best(
 
             let released = new_current.update(rooms);
 
-            let result = Result { total: released };
+            let released = released + find_best(rooms, best_paths, new_current, saved, false);
 
-            let result = result + find_best(rooms, best_paths, new_current, saved, false);
-
-            totals.push(result);
+            best_release = best_release.max(released);
         }
     }
     let mut new_current = current.clone();
@@ -212,13 +174,10 @@ fn find_best(
     if new_current.move_time_left_el != 0 || new_current.move_time_left_me != 0 {
         released += new_current.update_non_null(rooms);
     }
-    let stop_moving_total = Result {
-        total: released + new_current.total_flow_rate * new_current.time_left,
-    };
-    totals.push(stop_moving_total);
-    let best = totals.into_iter().max().unwrap();
-    saved.insert(current, best.clone());
-    best
+    released += new_current.total_flow_rate * new_current.time_left;
+    best_release = best_release.max(released);
+    saved.insert(current, best_release);
+    best_release
 }
 
 fn find_shortest_path(rooms: &HashMap<RoomID, Room>, from: RoomID, to: RoomID) -> u64 {
