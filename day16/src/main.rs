@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    ops::Add,
+};
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct RoomID(u16);
@@ -28,7 +31,7 @@ struct Room {
     leads_to: Vec<RoomID>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct Current {
     room_me: RoomID,
     room_el: RoomID,
@@ -37,197 +40,187 @@ struct Current {
 
     time_left: u64,
     total_flow_rate: u64,
-    opend_rooms: HashSet<RoomID>,
-    total: u64,
+    claimd_rooms: BTreeSet<RoomID>,
+}
 
-    path_me: Vec<RoomID>,
+impl Current {
+    fn update(&mut self, rooms: &HashMap<RoomID, Room>) -> u64 {
+        let used_time = self.move_time_left_me.min(self.move_time_left_el);
+
+        let released = self.total_flow_rate * used_time;
+
+        self.move_time_left_me -= used_time;
+        self.move_time_left_el -= used_time;
+        self.time_left -= used_time;
+
+        if self.move_time_left_me == 0 {
+            self.total_flow_rate += rooms.get(&self.room_me).unwrap().flow_rate;
+        }
+        if self.move_time_left_el == 0 {
+            self.total_flow_rate += rooms.get(&self.room_el).unwrap().flow_rate;
+        }
+        released
+    }
+
+    fn update_non_null(&mut self, rooms: &HashMap<RoomID, Room>) -> u64 {
+        let used_time = self.move_time_left_me.max(self.move_time_left_el);
+        if used_time > self.time_left {
+            return 0;
+        }
+
+        let released = self.total_flow_rate * used_time;
+        self.time_left -= used_time;
+
+        if self.move_time_left_me != 0 {
+            self.move_time_left_me -= used_time;
+            self.total_flow_rate += rooms.get(&self.room_me).unwrap().flow_rate;
+        }
+        if self.move_time_left_el != 0 {
+            self.move_time_left_el -= used_time;
+            self.total_flow_rate += rooms.get(&self.room_el).unwrap().flow_rate;
+        }
+        released
+    }
+}
+
+#[derive(Debug, Default, Clone, Eq)]
+struct Result {
+    total: u64,
     path_el: Vec<RoomID>,
+    path_me: Vec<RoomID>,
+}
+
+impl PartialEq for Result {
+    fn eq(&self, other: &Self) -> bool {
+        self.total.eq(&other.total)
+    }
+}
+
+impl PartialOrd for Result {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(&other))
+    }
+}
+
+impl Ord for Result {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.total.cmp(&other.total)
+    }
+}
+
+impl Add<Result> for Result {
+    type Output = Result;
+
+    fn add(self, rhs: Result) -> Self::Output {
+        let mut new_path_el = self.path_el.clone();
+        let mut new_path_me = self.path_me.clone();
+        new_path_el.extend_from_slice(&rhs.path_el);
+        new_path_me.extend_from_slice(&rhs.path_me);
+        Self {
+            total: self.total + rhs.total,
+            path_me: new_path_me,
+            path_el: new_path_el,
+        }
+    }
 }
 
 fn find_best(
     rooms: &HashMap<RoomID, Room>,
     best_paths: &HashMap<RoomID, HashMap<RoomID, u64>>,
-    mut current: Current,
-    best: &mut u64,
-) {
-    if current.time_left == 0 {
-        if current.total > *best {
-            *best = current.total;
-            // println!(
-            //     "me: {:?}\nel: {:?}\nscore: {}",
-            //     current.path_me, current.path_el, best
-            // );
-            println!(
-                "me: {:?} {:?}\nel: {:?} {:?}\nscore: {}, mtel: {}, mtme: {}, tl: {}",
-                current.path_me,
-                current.room_me,
-                current.path_el,
-                current.room_el,
-                current.total,
-                current.move_time_left_el,
-                current.move_time_left_me,
-                current.time_left,
-            );
-        }
-        return;
-    }
+    current: Current,
+    saved: &mut HashMap<Current, Result>,
+    first: bool,
+) -> Result {
     debug_assert!(current.time_left > 0);
 
-    if current.move_time_left_me == 0 && !current.path_me.contains(&current.room_me) {
-        current.path_me.push(current.room_me);
-        current.total_flow_rate += rooms.get(&current.room_me).unwrap().flow_rate;
-    }
-    if current.move_time_left_el == 0 && !current.path_el.contains(&current.room_el) {
-        current.path_el.push(current.room_el);
-        current.total_flow_rate += rooms.get(&current.room_el).unwrap().flow_rate;
+    if let Some(total) = saved.get(&current) {
+        return total.clone();
     }
 
-    // if current.path_me.starts_with(&[
-    //     name_to_room_id("AA"),
-    //     name_to_room_id("JJ"),
-    //     name_to_room_id("BB"),
-    // ]) && current.path_el.starts_with(&[
-    //     name_to_room_id("AA"),
-    //     name_to_room_id("DD"),
-    //     name_to_room_id("HH"),
-    // ]) {
-    //     println!(
-    //         "me: {:?} {:?}\nel: {:?} {:?}\nscore: {}, mtel: {}, mtme: {}, tl: {}",
-    //         current.path_me,
-    //         current.room_me,
-    //         current.path_el,
-    //         current.room_el,
-    //         current.total,
-    //         current.move_time_left_el,
-    //         current.move_time_left_me,
-    //         current.time_left,
-    //     );
-    // }
-
-    if current.move_time_left_me == 0 && current.move_time_left_el == 0 {
-        for (&me_to_id, &me_length) in best_paths.get(&current.room_me).unwrap().iter() {
-            let me_length = me_length + 1;
-            if current.opend_rooms.contains(&me_to_id) {
-                continue;
-            }
-            let me_room = rooms.get(&me_to_id).unwrap();
-            if me_room.flow_rate == 0 || current.time_left < me_length + 1 {
-                continue;
-            }
-            for (&el_to_id, &el_length) in best_paths.get(&current.room_el).unwrap().iter() {
-                if el_to_id == me_to_id {
-                    continue;
-                }
-                let el_length = el_length + 1;
-                if current.opend_rooms.contains(&el_to_id) {
-                    continue;
-                }
-                let el_room = rooms.get(&el_to_id).unwrap();
-                if el_room.flow_rate == 0 || current.time_left < el_length + 1 {
-                    continue;
-                }
-
-                let mut new_current = current.clone();
-                new_current.move_time_left_me = me_length;
-                new_current.move_time_left_el = el_length;
-                new_current.opend_rooms.insert(el_to_id);
-                new_current.opend_rooms.insert(me_to_id);
-                new_current.room_me = me_to_id;
-                new_current.room_el = el_to_id;
-
-                let used_time = if me_length < el_length {
-                    me_length
-                } else {
-                    el_length
-                };
-
-                new_current.move_time_left_me -= used_time;
-                new_current.move_time_left_el -= used_time;
-                new_current.total += new_current.total_flow_rate * used_time;
-                new_current.time_left -= used_time;
-
-                find_best(rooms, best_paths, new_current, best);
-            }
+    let filter = |(&to_id, &length)| {
+        let length = length + 1;
+        if current.claimd_rooms.contains(&to_id) {
+            return None;
         }
-        let mut new_current = current.clone();
-
-        new_current.total += new_current.total_flow_rate * new_current.time_left;
-        new_current.time_left = 0;
-
-        find_best(rooms, best_paths, new_current, best);
-    } else if current.move_time_left_me == 0 {
-        for (&to_id, &length) in best_paths.get(&current.room_me).unwrap().iter() {
-            let length = length + 1;
-            if current.opend_rooms.contains(&to_id) {
-                continue;
-            }
-            let room = rooms.get(&to_id).unwrap();
-            if room.flow_rate == 0 || current.time_left < length + 1 {
-                continue;
-            }
-
-            let mut new_current = current.clone();
-            new_current.move_time_left_me = length;
-
-            let used_time = if length > current.move_time_left_el {
-                current.move_time_left_el
-            } else {
-                length
-            };
-
-            new_current.move_time_left_me -= used_time;
-            new_current.move_time_left_el -= used_time;
-            new_current.total += new_current.total_flow_rate * used_time;
-            new_current.time_left -= used_time;
-            new_current.room_me = to_id;
-            new_current.opend_rooms.insert(to_id);
-
-            find_best(rooms, best_paths, new_current, best);
+        if current.time_left < length {
+            return None;
         }
-        let mut new_current = current.clone();
+        Some(Some((to_id, length)))
+    };
 
-        new_current.total += new_current.total_flow_rate * current.move_time_left_el;
-        new_current.time_left -= current.move_time_left_el;
-        new_current.move_time_left_el = 0;
-
-        find_best(rooms, best_paths, new_current, best);
+    let me_options = if current.move_time_left_me == 0 {
+        best_paths
+            .get(&current.room_me)
+            .unwrap()
+            .iter()
+            .filter_map(filter)
+            .collect()
     } else {
-        for (&to_id, &length) in best_paths.get(&current.room_el).unwrap().iter() {
-            let length = length + 1;
-            if current.opend_rooms.contains(&to_id) {
-                continue;
-            }
-            let room = rooms.get(&to_id).unwrap();
-            if room.flow_rate == 0 || current.time_left < length + 1 {
-                continue;
-            }
+        vec![None]
+    };
+    let el_options = if current.move_time_left_el == 0 {
+        best_paths
+            .get(&current.room_el)
+            .unwrap()
+            .iter()
+            .filter_map(filter)
+            .collect()
+    } else {
+        vec![None]
+    };
 
+    let mut totals = Vec::<Result>::new();
+
+    for me_data in &me_options {
+        for el_data in &el_options {
             let mut new_current = current.clone();
-            new_current.move_time_left_el = length;
 
-            let used_time = if length > current.move_time_left_me {
-                current.move_time_left_me
-            } else {
-                length
+            if let &Some((me_to_id, me_length)) = me_data {
+                if let Some((el_to_id, _)) = el_data {
+                    if el_to_id == &me_to_id {
+                        continue;
+                    }
+                }
+                new_current.move_time_left_me = me_length;
+                new_current.claimd_rooms.insert(me_to_id);
+                new_current.room_me = me_to_id;
+            }
+            if let &Some((el_to_id, el_length)) = el_data {
+                new_current.move_time_left_el = el_length;
+                new_current.claimd_rooms.insert(el_to_id);
+                new_current.room_el = el_to_id;
+            }
+
+            let released = new_current.update(rooms);
+
+            let result = Result {
+                total: released,
+                path_el: el_data.map(|(id, _)| id).into_iter().collect(),
+                path_me: me_data.map(|(id, _)| id).into_iter().collect(),
             };
 
-            new_current.move_time_left_me -= used_time;
-            new_current.move_time_left_el -= used_time;
-            new_current.total += new_current.total_flow_rate * used_time;
-            new_current.time_left -= used_time;
-            new_current.room_el = to_id;
-            new_current.opend_rooms.insert(to_id);
+            let result = result + find_best(rooms, best_paths, new_current, saved, false);
 
-            find_best(rooms, best_paths, new_current, best);
+            totals.push(result);
         }
-        let mut new_current = current.clone();
-
-        new_current.total += new_current.total_flow_rate * current.move_time_left_me;
-        new_current.time_left -= current.move_time_left_me;
-        new_current.move_time_left_me = 0;
-
-        find_best(rooms, best_paths, new_current, best);
     }
+    let mut new_current = current.clone();
+
+    assert!(!(new_current.move_time_left_el != 0 && new_current.move_time_left_me != 0));
+
+    let mut released = 0;
+    if new_current.move_time_left_el != 0 || new_current.move_time_left_me != 0 {
+        released += new_current.update_non_null(rooms);
+    }
+    let stop_moving_total = Result {
+        total: released + new_current.total_flow_rate * new_current.time_left,
+        path_el: vec![],
+        path_me: vec![],
+    };
+    totals.push(stop_moving_total);
+    let best = totals.into_iter().max().unwrap();
+    saved.insert(current, best.clone());
+    best
 }
 
 fn find_shortest_path(rooms: &HashMap<RoomID, Room>, from: RoomID, to: RoomID) -> u64 {
@@ -260,6 +253,13 @@ fn find_shortest_path(rooms: &HashMap<RoomID, Room>, from: RoomID, to: RoomID) -
 fn main() {
     // let input = include_str!("./example.txt");
     let input = include_str!("./input.txt");
+    // Old (correct 2052):
+    // me: [AA, UW, TG, KS, FG, AP, WY]
+    // el: [AA, TQ, EG, KR, EK, VW, FX]
+    //
+    // New (wrong 2033):
+    // me: [AA, FG, KS, TG, UW, MS, HT]
+    // el: [AA, TQ, EG, KR, EK, VW, FX]
 
     let mut rooms = HashMap::new();
 
@@ -290,6 +290,9 @@ fn main() {
     for from in rooms.keys() {
         let mut best_paths_from = HashMap::new();
         for to in rooms.keys() {
+            if rooms.get(to).unwrap().flow_rate == 0 {
+                continue;
+            }
             let l = find_shortest_path(&rooms, *from, *to);
             best_paths_from.insert(*to, l);
         }
@@ -303,14 +306,11 @@ fn main() {
         move_time_left_el: 0,
         time_left: 26,
         total_flow_rate: 0,
-        opend_rooms: HashSet::new(),
-        total: 0,
-
-        path_me: Vec::new(),
-        path_el: Vec::new(),
+        claimd_rooms: BTreeSet::new(),
     };
 
-    let mut best = 0;
-    find_best(&rooms, &best_paths, current, &mut best);
-    dbg!(best);
+    let mut saved = HashMap::new();
+
+    let best = find_best(&rooms, &best_paths, current, &mut saved, true);
+    println!("{:?}", best);
 }
