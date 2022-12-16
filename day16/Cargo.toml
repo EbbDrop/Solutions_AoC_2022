@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 itertools = "0.10.5"
-tqdm = "0.4.2"
+kdam = "0.3.0"

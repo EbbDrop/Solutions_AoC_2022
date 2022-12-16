@@ -1,3 +1,5 @@
+use kdam::Bar;
+use kdam::BarExt;
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     ops::Add,
@@ -86,8 +88,6 @@ impl Current {
 #[derive(Debug, Default, Clone, Eq)]
 struct Result {
     total: u64,
-    path_el: Vec<RoomID>,
-    path_me: Vec<RoomID>,
 }
 
 impl PartialEq for Result {
@@ -112,14 +112,8 @@ impl Add<Result> for Result {
     type Output = Result;
 
     fn add(self, rhs: Result) -> Self::Output {
-        let mut new_path_el = self.path_el.clone();
-        let mut new_path_me = self.path_me.clone();
-        new_path_el.extend_from_slice(&rhs.path_el);
-        new_path_me.extend_from_slice(&rhs.path_me);
         Self {
             total: self.total + rhs.total,
-            path_me: new_path_me,
-            path_el: new_path_el,
         }
     }
 }
@@ -171,8 +165,18 @@ fn find_best(
 
     let mut totals = Vec::<Result>::new();
 
+    let mut pb = if first {
+        Some(Bar::new(me_options.len() * el_options.len()))
+    } else {
+        None
+    };
+
     for me_data in &me_options {
         for el_data in &el_options {
+            if let Some(pb) = &mut pb {
+                pb.update(1);
+            }
+
             let mut new_current = current.clone();
 
             if let &Some((me_to_id, me_length)) = me_data {
@@ -193,11 +197,7 @@ fn find_best(
 
             let released = new_current.update(rooms);
 
-            let result = Result {
-                total: released,
-                path_el: el_data.map(|(id, _)| id).into_iter().collect(),
-                path_me: me_data.map(|(id, _)| id).into_iter().collect(),
-            };
+            let result = Result { total: released };
 
             let result = result + find_best(rooms, best_paths, new_current, saved, false);
 
@@ -214,8 +214,6 @@ fn find_best(
     }
     let stop_moving_total = Result {
         total: released + new_current.total_flow_rate * new_current.time_left,
-        path_el: vec![],
-        path_me: vec![],
     };
     totals.push(stop_moving_total);
     let best = totals.into_iter().max().unwrap();
