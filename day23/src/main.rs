@@ -1,41 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    fmt::Display,
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     ops::{Add, AddAssign},
 };
-
-#[derive(Debug, Clone)]
-struct Display2D(Vec<String>);
-
-impl Display2D {
-    fn new(w: usize, h: usize, start_char: char) -> Self {
-        let mut d = Vec::with_capacity(h);
-
-        for _ in 0..h {
-            d.push(std::iter::repeat(start_char).take(w).collect())
-        }
-
-        Display2D(d)
-    }
-
-    fn draw(&mut self, x: i32, y: i32, c: char) {
-        if y >= 0 && y < self.0.len() as i32 {
-            let l = &mut self.0[y as usize];
-            if x >= 0 && x < l.len() as i32 {
-                l.replace_range(x as usize..x as usize + 1, &c.to_string());
-            }
-        }
-    }
-}
-
-impl Display for Display2D {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for l in &self.0 {
-            writeln!(f, "{}", l)?
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct V {
@@ -105,11 +71,12 @@ fn main() {
 
     let mut steps = 0;
     loop {
+        steps += 1;
         // This maps new pos to old pos
         let mut provisions = HashMap::new();
 
         'next_elf: for elf in &elfs {
-            'has_to_move: loop {
+            'has_to_move: {
                 for x_diff in -1..=1 {
                     for y_diff in -1..=1 {
                         if x_diff == 0 && y_diff == 0 {
@@ -136,19 +103,23 @@ fn main() {
                     }
                 }
                 let new_pos = elf.clone() + dir;
-                if provisions.contains_key(&new_pos) {
-                    *provisions.get_mut(&new_pos).unwrap() = None;
-                } else {
-                    provisions.insert(new_pos, Some(elf.clone()));
+
+                match provisions.entry(new_pos) {
+                    Entry::Occupied(mut e) => {
+                        e.insert(None);
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert(Some(elf.clone()));
+                    }
                 }
-                break;
+                break 'next_dir;
             }
         }
         if provisions.is_empty() {
             break;
         }
 
-        for (_, from) in &provisions {
+        for from in provisions.values() {
             if let &Some(ref from) = from {
                 elfs.remove(from);
             }
@@ -160,29 +131,6 @@ fn main() {
         }
 
         search_dir.rotate_left(1);
-
-        // let mut min = elfs.iter().next().unwrap().clone();
-        // let mut max = min.clone();
-        // for elf in &elfs {
-        //     min.x = min.x.min(elf.x);
-        //     min.y = min.y.min(elf.y);
-
-        //     max.x = max.x.max(elf.x);
-        //     max.y = max.y.max(elf.y);
-        // }
-
-        // let mut d = Display2D::new(
-        //     (max.x - min.x + 1) as usize,
-        //     (max.y - min.y + 1) as usize,
-        //     '.',
-        // );
-        // for elf in &elfs {
-        //     d.draw(elf.x - min.x, elf.y - min.y, '#');
-        // }
-        // println!("{}", d);
-
-        // dbg!(((max.x - min.x + 1) * (max.y - min.y + 1)) - elfs.len() as i32);
-        steps += 1;
     }
-    dbg!(steps + 1);
+    dbg!(steps);
 }
